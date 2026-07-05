@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Flag Coloring Coach">
+  <rect width="512" height="512" rx="96" fill="#f6f4ee"/>
+  <path d="M126 112v300" stroke="#2f6f73" stroke-width="34" stroke-linecap="round"/>
+  <path d="M154 118h232c23 0 41 18 41 41v130c0 23-18 41-41 41H154z" fill="#ffffff" stroke="#173a3d" stroke-width="16"/>
+  <path d="M154 118h91v212h-91z" fill="#2f6f73"/>
+  <path d="M245 118h91v212h-91z" fill="#f4b740"/>
+  <path d="M336 118h91v212h-91z" fill="#d94f3d"/>
+  <circle cx="354" cy="376" r="54" fill="#d8ece6" stroke="#173a3d" stroke-width="14"/>
+  <path d="M330 376l17 17 34-39" fill="none" stroke="#18864b" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -1,0 +1,17 @@
+{
+  "name": "Flag Coloring Coach",
+  "short_name": "Flag Coach",
+  "description": "A calm flag coloring coach for young children.",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#f6f4ee",
+  "theme_color": "#2f6f73",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
