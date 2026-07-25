@@ -1,11 +1,19 @@
-const CACHE_NAME = "flag-coloring-coach-v2";
+const CACHE_NAME = "flag-coloring-coach-v4";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./manifest.webmanifest",
   "./icon.svg",
   "./assets/index.js",
-  "./assets/index.css"
+  "./assets/index.css",
+  "./assets/ar.svg",
+  "./assets/br.svg",
+  "./assets/eg.svg",
+  "./assets/es.svg",
+  "./assets/fj.svg",
+  "./assets/mx.svg",
+  "./assets/pt.svg",
+  "./assets/sa.svg"
 ];
 
 self.addEventListener("install", (event) => {

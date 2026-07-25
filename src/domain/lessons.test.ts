@@ -3,10 +3,10 @@ import { STARTER_COUNTRIES } from "./countries";
 import { buildLessons, getLessonByIndex } from "./lessons";
 
 describe("lesson building", () => {
-  it("splits the starter countries into eight short lessons of five flags", () => {
+  it("splits the 60 countries into twelve short lessons of five flags", () => {
     const lessons = buildLessons(STARTER_COUNTRIES, 5);
 
-    expect(lessons).toHaveLength(8);
+    expect(lessons).toHaveLength(12);
     expect(lessons.map((lesson) => lesson.countries)).toEqual([
       ["japan", "bangladesh", "france", "germany", "italy"],
       ["ireland", "netherlands", "poland", "ukraine", "finland"],
@@ -15,7 +15,17 @@ describe("lesson building", () => {
       ["spain", "belgium", "austria", "switzerland", "norway"],
       ["greece", "israel", "china", "south-korea", "mexico"],
       ["argentina", "colombia", "nigeria", "egypt", "morocco"],
-      ["saudi-arabia", "indonesia", "thailand", "vietnam", "new-zealand"]
+      ["saudi-arabia", "indonesia", "thailand", "vietnam", "new-zealand"],
+      ["united-kingdom", "portugal", "russia", "czechia", "iceland"],
+      [
+        "philippines",
+        "malaysia",
+        "singapore",
+        "united-arab-emirates",
+        "nepal"
+      ],
+      ["chile", "peru", "cuba", "jamaica", "kenya"],
+      ["ethiopia", "ghana", "algeria", "fiji", "palestine"]
     ]);
   });
 

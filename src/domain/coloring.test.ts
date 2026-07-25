@@ -67,4 +67,19 @@ describe("coloring rules", () => {
     expect(third.completed).toBe(true);
     expect(isCountryComplete(france, third.nextState)).toBe(true);
   });
+
+  it("fills repeated same-color details together for young children", () => {
+    const canada = findCountry("canada");
+    const state = createColoringState(canada);
+
+    const result = applyColorToRegion(canada, state, "maple-leaf", "red");
+
+    expect(result.correct).toBe(true);
+    expect(result.nextState.filledRegions).toEqual({
+      "left-red-band": "#d52b1e",
+      "right-red-band": "#d52b1e",
+      "maple-leaf": "#d52b1e"
+    });
+    expect(result.completed).toBe(true);
+  });
 });

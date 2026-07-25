@@ -6,6 +6,7 @@ import {
   ChevronRight,
   RotateCcw,
   Sparkles,
+  Volume1,
   Volume2,
   X
 } from "lucide-react";
@@ -13,7 +14,9 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent,
   type ReactNode
 } from "react";
@@ -36,6 +39,7 @@ import {
   getCountryMastery,
   getProgressSummary,
   recordCountryResult,
+  recordRecognitionResult,
   resetProgress,
   type ProgressState
 } from "./domain/progress";
@@ -44,6 +48,12 @@ import {
   PROGRESS_STORAGE_KEY,
   serializeProgress
 } from "./domain/progressStorage";
+import {
+  answerRecognition,
+  createRecognitionRound,
+  type RecognitionRound
+} from "./domain/recognition";
+import { getReferenceFlag } from "./domain/referenceFlags";
 import { registerServiceWorker } from "./serviceWorker";
 
 const lessons = buildLessons(STARTER_COUNTRIES, 5);
@@ -51,6 +61,10 @@ const lessons = buildLessons(STARTER_COUNTRIES, 5);
 const countryById = new Map(
   STARTER_COUNTRIES.map((country) => [country.id, country])
 );
+
+const getPaletteColor = (country: CountryFlag, color: ColorName): string =>
+  country.flagRegions.find((region) => region.colorName === color)
+    ?.targetColor ?? FLAG_COLOR_HEX[color];
 
 const getStoredProgress = (): ProgressState => {
   if (typeof window === "undefined") {
@@ -60,7 +74,9 @@ const getStoredProgress = (): ProgressState => {
   return parseStoredProgress(window.localStorage.getItem(PROGRESS_STORAGE_KEY));
 };
 
-const speak = (text: string) => {
+type SpeechSpeed = "normal" | "slow";
+
+const speak = (text: string, speed: SpeechSpeed = "normal") => {
   if (!("speechSynthesis" in window)) {
     return;
   }
@@ -68,10 +84,15 @@ const speak = (text: string) => {
   window.speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = "en-US";
-  utterance.rate = 0.82;
-  utterance.pitch = 1.08;
+  utterance.rate = speed === "slow" ? 0.58 : 0.82;
+  utterance.pitch = speed === "slow" ? 1 : 1.08;
   window.speechSynthesis.speak(utterance);
 };
+
+const speakCountryName = (
+  country: Pick<CountryFlag, "name">,
+  speed: SpeechSpeed = "normal"
+) => speak(country.name, speed);
 
 const starPoints = (shape: Extract<FlagShape, { kind: "star" }>): string => {
   const points: string[] = [];
@@ -93,9 +114,11 @@ const renderShape = (
   shape: FlagShape,
   fill: string,
   className: string,
-  onClick?: () => void
+  onClick?: () => void,
+  ariaLabel?: string
 ): ReactNode => {
   const isTarget = className.includes("target-region");
+  const isPracticeRegion = className.includes("practice-region");
   const isText = shape.kind === "text";
   const paint = "paint" in shape ? shape.paint : undefined;
   const shapeFill = paint?.fill === "none" ? "none" : fill;
@@ -104,7 +127,7 @@ const renderShape = (
       ? fill
       : paint?.stroke === "none" || isText
         ? "none"
-        : isTarget
+        : isTarget || isPracticeRegion
           ? "none"
           : "rgba(23, 58, 61, 0.48)";
   const shapeStrokeWidth =
@@ -112,7 +135,9 @@ const renderShape = (
   const transform =
     shape.kind === "rect" && typeof shape.rotation === "number"
       ? `rotate(${shape.rotation} ${shape.rotateCx ?? 0} ${shape.rotateCy ?? 0})`
-      : undefined;
+      : shape.kind === "path"
+        ? shape.transform
+        : undefined;
   const commonProps = {
     className,
     fill: shapeFill,
@@ -122,6 +147,8 @@ const renderShape = (
     strokeLinejoin: paint?.strokeLinejoin,
     transform,
     onClick,
+    pointerEvents: onClick ? "all" : undefined,
+    "aria-label": onClick ? ariaLabel : undefined,
     role: onClick ? "button" : undefined,
     tabIndex: onClick ? 0 : undefined,
     onKeyDown: onClick
@@ -181,6 +208,7 @@ const renderShape = (
         <g
           className={className}
           onClick={onClick}
+          aria-label={onClick ? ariaLabel : undefined}
           role={onClick ? "button" : undefined}
           tabIndex={onClick ? 0 : undefined}
           onKeyDown={commonProps.onKeyDown}
@@ -210,47 +238,184 @@ const FlagCanvas = ({
   interactive = false,
   onRegionPress
 }: FlagCanvasProps) => {
-  return (
-    <svg
-      className="flag-svg"
-      viewBox="0 0 300 180"
-      aria-label={`${country.name} flag`}
-    >
-      <rect className="flag-paper" x="0" y="0" width="300" height="180" />
-      {country.flagRegions.map((region) => {
-        const fill = state
-          ? state.filledRegions[region.id] ?? "#eef3f7"
-          : region.targetColor;
-        const isSelectedTarget = selectedColor === region.colorName;
+  const referenceFlag = getReferenceFlag(country.id);
+  const isComplete =
+    state !== undefined && getCompletionPercent(country, state) === 100;
 
-        return (
-          <g key={region.id} aria-label={region.colorName}>
-            {renderShape(
-              region.shape,
-              fill,
-              interactive
-                ? `flag-region ${isSelectedTarget ? "region-ready" : ""}`
-                : "flag-region target-region",
-              interactive && onRegionPress
-                ? () => onRegionPress(region.id)
-                : undefined
-            )}
-          </g>
-        );
-      })}
-    </svg>
+  if (!interactive) {
+    return (
+      <img
+        className="reference-flag"
+        src={referenceFlag.src}
+        alt={`${country.name} flag`}
+        draggable={false}
+      />
+    );
+  }
+
+  return (
+    <div
+      className="practice-flag"
+      style={{
+        aspectRatio: referenceFlag.aspectRatio,
+        "--practice-flag-max-width": `${referenceFlag.aspectRatio * 360}px`,
+        "--practice-flag-mobile-max-width": `${referenceFlag.aspectRatio * 260}px`
+      } as CSSProperties}
+    >
+      <img
+        className={`practice-flag-reference ${
+          isComplete ? "is-complete" : "is-coloring"
+        }`}
+        src={referenceFlag.src}
+        alt=""
+        aria-hidden="true"
+        draggable={false}
+      />
+      <svg
+        className="flag-svg practice-flag-overlay"
+        viewBox="0 0 300 180"
+        preserveAspectRatio="none"
+        aria-label={`${country.name} coloring flag`}
+      >
+        {!isComplete ? (
+          <>
+            <defs>
+              {country.flagRegions.map((region) => (
+                <mask
+                  id={`flag-mask-${country.id}-${region.id}`}
+                  key={region.id}
+                  x="0"
+                  y="0"
+                  width="300"
+                  height="180"
+                  maskUnits="userSpaceOnUse"
+                  maskContentUnits="userSpaceOnUse"
+                >
+                  {renderShape(
+                    region.shape,
+                    "white",
+                    "mask-region target-region"
+                  )}
+                </mask>
+              ))}
+            </defs>
+
+            {country.flagRegions.map((region) => {
+              const isFilled = state?.filledRegions[region.id] !== undefined;
+
+              return (
+                <image
+                  className={
+                    isFilled
+                      ? "painted-reference-region"
+                      : "unpainted-reference-region"
+                  }
+                  href={referenceFlag.src}
+                  key={region.id}
+                  x="0"
+                  y="0"
+                  width="300"
+                  height="180"
+                  preserveAspectRatio="none"
+                  mask={`url(#flag-mask-${country.id}-${region.id})`}
+                />
+              );
+            })}
+
+            {country.flagRegions.map((region) => {
+              const isFilled = state?.filledRegions[region.id] !== undefined;
+              const isSelectedTarget =
+                !isFilled && selectedColor === region.colorName;
+              const onPress =
+                onRegionPress && !isFilled
+                  ? () => onRegionPress(region.id)
+                  : undefined;
+
+              return (
+                <g key={region.id} aria-label={region.colorName}>
+                  {renderShape(
+                    region.shape,
+                    "transparent",
+                    `flag-region practice-region ${
+                      isSelectedTarget ? "region-ready" : ""
+                    }`,
+                    region.hitShape ? undefined : onPress,
+                    `${region.colorName} region`
+                  )}
+                  {region.hitShape && onPress
+                    ? renderShape(
+                        region.hitShape,
+                        "transparent",
+                        "flag-region practice-hit-region",
+                        onPress,
+                        `${region.colorName} region`
+                      )
+                    : null}
+                </g>
+              );
+            })}
+          </>
+        ) : null}
+        {country.id !== "nepal" ? (
+          <rect
+            className="flag-outline"
+            x="1.5"
+            y="1.5"
+            width="297"
+            height="177"
+            vectorEffect="non-scaling-stroke"
+          />
+        ) : null}
+      </svg>
+    </div>
   );
 };
+
+type ColorPaletteProps = {
+  country: CountryFlag;
+  selectedColor: ColorName;
+  className: string;
+  onSelect: (color: ColorName) => void;
+};
+
+const ColorPalette = ({
+  country,
+  selectedColor,
+  className,
+  onSelect
+}: ColorPaletteProps) => (
+  <div className={`palette ${className}`} aria-label="Colors">
+    {country.colors.map((color) => (
+      <button
+        className={selectedColor === color ? "color-chip active" : "color-chip"}
+        key={color}
+        type="button"
+        aria-label={color}
+        onClick={() => onSelect(color)}
+      >
+        <span
+          className="color-swatch"
+          style={{ backgroundColor: getPaletteColor(country, color) }}
+        />
+        <span>{color}</span>
+      </button>
+    ))}
+  </div>
+);
 
 export const App = () => {
   const [lessonIndex, setLessonIndex] = useState(0);
   const [countryIndex, setCountryIndex] = useState(0);
   const [progress, setProgress] = useState<ProgressState>(getStoredProgress);
   const [isParentOpen, setIsParentOpen] = useState(false);
+  const [recognitionRound, setRecognitionRound] =
+    useState<RecognitionRound | null>(null);
+  const [lastWrongChoice, setLastWrongChoice] = useState<string | null>(null);
   const [completedThisSession, setCompletedThisSession] = useState<Set<string>>(
     () => new Set()
   );
-  const [lastMessage, setLastMessage] = useState("Tap the speaker.");
+  const [lastMessage, setLastMessage] = useState("Listen to the country name.");
+  const recognitionPromptTimer = useRef<number | null>(null);
 
   const currentLesson = getLessonByIndex(lessons, lessonIndex);
   const lessonCountries = currentLesson.countries
@@ -267,8 +432,16 @@ export const App = () => {
 
   const completionPercent = getCompletionPercent(currentCountry, coloringState);
   const isCurrentComplete = completionPercent === 100;
+  const isRecognitionComplete = recognitionRound?.status === "correct";
   const lessonComplete = lessonCountries.every((country) =>
     completedThisSession.has(country.id)
+  );
+  const recognitionCountries = useMemo(
+    () =>
+      recognitionRound?.optionIds
+        .map((countryId) => countryById.get(countryId))
+        .filter((country): country is CountryFlag => !!country) ?? [],
+    [recognitionRound]
   );
   const progressSummary = useMemo(
     () => getProgressSummary(progress, STARTER_COUNTRIES.length),
@@ -291,19 +464,40 @@ export const App = () => {
       lessonCountries[countryIndex] ??
       lessonCountries[0] ??
       STARTER_COUNTRIES[0];
+    if (recognitionPromptTimer.current !== null) {
+      window.clearTimeout(recognitionPromptTimer.current);
+      recognitionPromptTimer.current = null;
+    }
     setColoringState(createColoringState(nextCountry));
-    setSelectedColor(nextCountry.colors[0]);
-    setLastMessage("Tap the speaker.");
-    speak(nextCountry.name);
+    const firstColor = nextCountry.colors[0];
+    setSelectedColor(firstColor);
+    setRecognitionRound(null);
+    setLastWrongChoice(null);
+    setLastMessage(`Find ${firstColor}.`);
+    speak(`This is ${nextCountry.name}. Find ${firstColor}.`);
   }, [countryIndex, lessonIndex]);
 
+  useEffect(
+    () => () => {
+      if (recognitionPromptTimer.current !== null) {
+        window.clearTimeout(recognitionPromptTimer.current);
+      }
+    },
+    []
+  );
+
   const replayCountryName = useCallback(() => {
-    speak(currentCountry.name);
+    speakCountryName(currentCountry);
+  }, [currentCountry.name]);
+
+  const replayCountryNameSlowly = useCallback(() => {
+    speakCountryName(currentCountry, "slow");
   }, [currentCountry.name]);
 
   const handleColorSelect = (color: ColorName) => {
     setSelectedColor(color);
-    speak(color);
+    setLastMessage(`Find ${color}.`);
+    speak(`Find ${color}.`);
   };
 
   const handleRegionPress = (regionId: string) => {
@@ -322,22 +516,12 @@ export const App = () => {
     setColoringState(result.nextState);
 
     if (!result.correct) {
-      setLastMessage("Try another color.");
-      speak("Try another color.");
+      setLastMessage(`Almost. Try ${selectedColor} again.`);
+      speak(`Almost. Try ${selectedColor} again.`);
       return;
     }
 
-    if (result.spokenColorName) {
-      setLastMessage(result.spokenColorName);
-      speak(result.spokenColorName);
-    }
-
     if (result.completed && !wasComplete) {
-      setCompletedThisSession((existing) => {
-        const next = new Set(existing);
-        next.add(currentCountry.id);
-        return next;
-      });
       setProgress((existing) =>
         recordCountryResult(existing, {
           countryId: currentCountry.id,
@@ -345,8 +529,82 @@ export const App = () => {
           mistakes: result.nextState.mistakes
         })
       );
-      window.setTimeout(() => speak(`Great job. ${currentCountry.name}.`), 650);
+      setRecognitionRound(
+        createRecognitionRound(
+          STARTER_COUNTRIES,
+          currentCountry.id,
+          Date.now()
+        )
+      );
+      setLastWrongChoice(null);
+      setLastMessage(`Which flag is ${currentCountry.name}?`);
+      recognitionPromptTimer.current = window.setTimeout(
+        () =>
+          speak(
+            `Great job. Now find ${currentCountry.name}. Which flag is ${currentCountry.name}?`
+          ),
+        650
+      );
+      return;
     }
+
+    const nextRegion = currentCountry.flagRegions.find(
+      (region) =>
+        result.nextState.filledRegions[region.id] !== region.targetColor
+    );
+    if (nextRegion) {
+      setSelectedColor(nextRegion.colorName);
+      setLastMessage(`Good! Now find ${nextRegion.colorName}.`);
+      speak(`Good. Now find ${nextRegion.colorName}.`);
+    }
+  };
+
+  const handleRecognitionChoice = (selectedCountryId: string) => {
+    if (!recognitionRound) {
+      return;
+    }
+
+    if (recognitionPromptTimer.current !== null) {
+      window.clearTimeout(recognitionPromptTimer.current);
+      recognitionPromptTimer.current = null;
+    }
+
+    const isFirstTry = recognitionRound.status === "asking";
+    const result = answerRecognition(recognitionRound, selectedCountryId);
+    setRecognitionRound(result.nextRound);
+
+    if (!result.correct) {
+      setProgress((existing) =>
+        recordRecognitionResult(existing, {
+          countryId: currentCountry.id,
+          recognized: false
+        })
+      );
+      setLastWrongChoice(selectedCountryId);
+      setLastMessage(`Almost. Listen again and find ${currentCountry.name}.`);
+      speak(`Almost. Listen again. Find ${currentCountry.name}.`);
+      return;
+    }
+
+    setLastWrongChoice(null);
+    if (!result.newlyCompleted) {
+      return;
+    }
+
+    setCompletedThisSession((existing) => {
+      const next = new Set(existing);
+      next.add(currentCountry.id);
+      return next;
+    });
+    setProgress((existing) =>
+      recordRecognitionResult(existing, {
+        countryId: currentCountry.id,
+        recognized: true,
+        firstTry: isFirstTry
+      })
+    );
+    setLastMessage(`Yes! This is ${currentCountry.name}.`);
+    speak(`Yes. This is ${currentCountry.name}. Great job.`);
   };
 
   const goToCountry = (nextIndex: number) => {
@@ -380,9 +638,12 @@ export const App = () => {
   return (
     <main className="app-shell">
       <header className="top-bar">
-        <div>
+        <div className="country-heading">
           <p className="eyebrow">Flag Coloring Coach</p>
           <h1>{currentCountry.name}</h1>
+          <p className="phonetic-name" aria-label="Pronunciation">
+            {currentCountry.phonetic}
+          </p>
         </div>
         <button
           className="icon-button parent-button"
@@ -410,27 +671,86 @@ export const App = () => {
       <section className="coach-layout">
         <div className="flag-workspace">
           <div className="target-strip">
-            <div className="target-preview">
-              <FlagCanvas country={currentCountry} />
+            {recognitionRound ? (
+              <div className="recognition-question">
+                <span>Listen and choose</span>
+                <strong>
+                  {isRecognitionComplete
+                    ? `You found ${currentCountry.name}!`
+                    : `Which flag is ${currentCountry.name}?`}
+                </strong>
+              </div>
+            ) : (
+              <div className="target-preview">
+                <FlagCanvas country={currentCountry} />
+              </div>
+            )}
+            <div className="name-audio-controls">
+              <button
+                className="speak-button"
+                type="button"
+                aria-label={`Hear ${currentCountry.name}`}
+                onClick={replayCountryName}
+              >
+                <Volume2 aria-hidden="true" />
+                <span>Hear name</span>
+              </button>
+              <button
+                className="slow-speak-button"
+                type="button"
+                aria-label={`Hear ${currentCountry.name} slowly`}
+                onClick={replayCountryNameSlowly}
+              >
+                <Volume1 aria-hidden="true" />
+                <span>Slow</span>
+              </button>
             </div>
-            <button
-              className="speak-button"
-              type="button"
-              aria-label={`Say ${currentCountry.name}`}
-              onClick={replayCountryName}
-            >
-              <Volume2 aria-hidden="true" />
-            </button>
           </div>
 
-          <div className="paint-stage">
-            <FlagCanvas
+          {!recognitionRound ? (
+            <ColorPalette
+              className="mobile-palette"
               country={currentCountry}
-              interactive
-              onRegionPress={handleRegionPress}
               selectedColor={selectedColor}
-              state={coloringState}
+              onSelect={handleColorSelect}
             />
+          ) : null}
+
+          <div className="paint-stage">
+            {recognitionRound && recognitionCountries.length === 2 ? (
+              <div
+                className="recognition-choices"
+                role="group"
+                aria-label={`Choose the ${currentCountry.name} flag`}
+              >
+                {recognitionCountries.map((country) => (
+                  <button
+                    className={[
+                      "recognition-choice",
+                      lastWrongChoice === country.id ? "is-wrong" : "",
+                      isRecognitionComplete && country.id === currentCountry.id
+                        ? "is-correct"
+                        : ""
+                    ].join(" ")}
+                    type="button"
+                    key={country.id}
+                    aria-label={`${country.name} flag`}
+                    disabled={isRecognitionComplete}
+                    onClick={() => handleRecognitionChoice(country.id)}
+                  >
+                    <FlagCanvas country={country} />
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <FlagCanvas
+                country={currentCountry}
+                interactive
+                onRegionPress={handleRegionPress}
+                selectedColor={selectedColor}
+                state={coloringState}
+              />
+            )}
           </div>
 
           <div className="progress-rail" aria-label="Lesson progress">
@@ -457,29 +777,22 @@ export const App = () => {
         </div>
 
         <aside className="practice-panel">
-          <div className="palette" aria-label="Colors">
-            {currentCountry.colors.map((color) => (
-              <button
-                className={selectedColor === color ? "color-chip active" : "color-chip"}
-                key={color}
-                type="button"
-                aria-label={color}
-                onClick={() => handleColorSelect(color)}
-              >
-                <span
-                  className="color-swatch"
-                  style={{ backgroundColor: FLAG_COLOR_HEX[color] }}
-                />
-                <span>{color}</span>
-              </button>
-            ))}
-          </div>
+          {!recognitionRound ? (
+            <ColorPalette
+              className="desktop-palette"
+              country={currentCountry}
+              selectedColor={selectedColor}
+              onSelect={handleColorSelect}
+            />
+          ) : null}
 
           <div className="status-band" aria-live="polite">
-            {isCurrentComplete ? (
+            {isRecognitionComplete ? (
               <>
                 <Sparkles aria-hidden="true" />
-                <span>{lessonComplete ? "Lesson complete" : "Great job"}</span>
+                <span>
+                  {lessonComplete ? "Lesson complete!" : lastMessage}
+                </span>
               </>
             ) : (
               <span>{lastMessage}</span>
@@ -504,7 +817,7 @@ export const App = () => {
               className="next-button"
               type="button"
               onClick={goToNextCountry}
-              disabled={!isCurrentComplete}
+              disabled={!isRecognitionComplete}
             >
               <span>{lessonComplete ? "Next lesson" : "Next"}</span>
               <ArrowRight aria-hidden="true" />
@@ -513,7 +826,10 @@ export const App = () => {
               className="quiet-button"
               type="button"
               onClick={() => goToCountry(countryIndex + 1)}
-              disabled={countryIndex === lessonCountries.length - 1}
+              disabled={
+                !isRecognitionComplete ||
+                countryIndex === lessonCountries.length - 1
+              }
               aria-label="Next flag"
             >
               <ChevronRight aria-hidden="true" />
@@ -562,6 +878,7 @@ export const App = () => {
             <div className="progress-list">
               {STARTER_COUNTRIES.map((country) => {
                 const countryProgress = progress.countries[country.id];
+                const recognitionProgress = progress.recognition[country.id];
                 const mastery = getCountryMastery(progress, country.id);
                 return (
                   <div className="progress-row" key={country.id}>
@@ -572,9 +889,22 @@ export const App = () => {
                       <strong>{country.name}</strong>
                       <span>{mastery}</span>
                     </div>
-                    <span className="attempt-pill">
-                      {countryProgress?.completions ?? 0}
-                    </span>
+                    <div className="progress-counts">
+                      <span
+                        className="attempt-pill"
+                        aria-label={`${countryProgress?.completions ?? 0} coloring completions`}
+                        title="Coloring completions"
+                      >
+                        Color {countryProgress?.completions ?? 0}
+                      </span>
+                      <span
+                        className="recognition-pill"
+                        aria-label={`${recognitionProgress?.successfulRounds ?? 0} recognition successes, ${recognitionProgress?.firstTrySuccesses ?? 0} on the first try`}
+                        title={`${recognitionProgress?.firstTrySuccesses ?? 0} first-try successes; ${recognitionProgress?.retries ?? 0} retries`}
+                      >
+                        Quiz {recognitionProgress?.successfulRounds ?? 0}
+                      </span>
+                    </div>
                   </div>
                 );
               })}

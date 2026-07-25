@@ -1,18 +1,87 @@
-import { createEmptyProgress, type ProgressState } from "./progress";
+import {
+  createEmptyProgress,
+  type CountryProgress,
+  type ProgressState,
+  type RecognitionProgress
+} from "./progress";
 
 export const PROGRESS_STORAGE_KEY = "flag-coloring-coach-progress";
 
-const isProgressState = (value: unknown): value is ProgressState => {
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === "object" && !Array.isArray(value);
+
+const toCount = (value: unknown): number =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.floor(value)
+    : 0;
+
+const normalizeCountryProgress = (
+  value: unknown
+): CountryProgress | undefined => {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  return {
+    attempts: toCount(value.attempts),
+    completions: toCount(value.completions),
+    mistakes: toCount(value.mistakes),
+    lastPracticedAt:
+      typeof value.lastPracticedAt === "string" ? value.lastPracticedAt : ""
+  };
+};
+
+const normalizeRecognitionProgress = (
+  value: unknown
+): RecognitionProgress | undefined => {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  return {
+    successfulRounds: toCount(value.successfulRounds),
+    firstTrySuccesses: toCount(value.firstTrySuccesses),
+    retries: toCount(value.retries),
+    lastAttemptedAt:
+      typeof value.lastAttemptedAt === "string"
+        ? value.lastAttemptedAt
+        : ""
+  };
+};
+
+const normalizeProgressState = (value: unknown): ProgressState | undefined => {
   if (!value || typeof value !== "object") {
-    return false;
+    return undefined;
   }
 
   const candidate = value as Partial<ProgressState>;
-  return (
-    !!candidate.countries &&
-    typeof candidate.countries === "object" &&
-    !Array.isArray(candidate.countries)
-  );
+  if (!isRecord(candidate.countries)) {
+    return undefined;
+  }
+
+  const countries: ProgressState["countries"] = {};
+  for (const [countryId, countryProgress] of Object.entries(
+    candidate.countries
+  )) {
+    const normalized = normalizeCountryProgress(countryProgress);
+    if (normalized) {
+      countries[countryId] = normalized;
+    }
+  }
+
+  const recognition: ProgressState["recognition"] = {};
+  if (isRecord(candidate.recognition)) {
+    for (const [countryId, recognitionProgress] of Object.entries(
+      candidate.recognition
+    )) {
+      const normalized = normalizeRecognitionProgress(recognitionProgress);
+      if (normalized) {
+        recognition[countryId] = normalized;
+      }
+    }
+  }
+
+  return { countries, recognition };
 };
 
 export const serializeProgress = (progress: ProgressState): string => {
@@ -26,7 +95,7 @@ export const parseStoredProgress = (storedValue: string | null): ProgressState =
 
   try {
     const parsed: unknown = JSON.parse(storedValue);
-    return isProgressState(parsed) ? parsed : createEmptyProgress();
+    return normalizeProgressState(parsed) ?? createEmptyProgress();
   } catch {
     return createEmptyProgress();
   }

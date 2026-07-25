@@ -36,7 +36,7 @@ const collectShapeKinds = (shape: { kind: string; shapes?: unknown[] }): string[
 };
 
 describe("starter country pack", () => {
-  it("contains the planned 40-country starter set in a stable order", () => {
+  it("contains the planned 60-country set in a stable order", () => {
     expect(STARTER_COUNTRIES.map((country) => country.id)).toEqual([
       "japan",
       "bangladesh",
@@ -77,7 +77,27 @@ describe("starter country pack", () => {
       "indonesia",
       "thailand",
       "vietnam",
-      "new-zealand"
+      "new-zealand",
+      "united-kingdom",
+      "portugal",
+      "russia",
+      "czechia",
+      "iceland",
+      "philippines",
+      "malaysia",
+      "singapore",
+      "united-arab-emirates",
+      "nepal",
+      "chile",
+      "peru",
+      "cuba",
+      "jamaica",
+      "kenya",
+      "ethiopia",
+      "ghana",
+      "algeria",
+      "fiji",
+      "palestine"
     ]);
   });
 
@@ -88,6 +108,8 @@ describe("starter country pack", () => {
       expect(ids.has(country.id)).toBe(false);
       ids.add(country.id);
       expect(country.name.length).toBeGreaterThan(1);
+      expect(country.phonetic).toMatch(/[A-Z]/);
+      expect(country.phonetic).not.toMatch(/[ˈˌəɪʊɛɔæ]/);
       expect(country.flagRegions.length).toBeGreaterThan(0);
       expect(country.colors.length).toBeGreaterThan(0);
 
@@ -101,6 +123,9 @@ describe("starter country pack", () => {
         expect(region.id).toMatch(/^[a-z0-9-]+$/);
         expect(region.targetColor).toMatch(/^#[0-9a-f]{6}$/i);
         expect(collectShapeKinds(region.shape).every(Boolean)).toBe(true);
+        if (region.hitShape) {
+          expect(collectShapeKinds(region.hitShape).every(Boolean)).toBe(true);
+        }
       }
     }
   });
@@ -168,5 +193,79 @@ describe("starter country pack", () => {
       }
     );
     expect(thailandStripeHeights).toEqual([30, 30, 60, 30, 30]);
+  });
+
+  it("keeps corrected signature geometry in the coloring hit regions", () => {
+    const japanDisc = getRegion("japan", "disc").shape;
+    expect(japanDisc).toMatchObject({ kind: "circle", r: 54 });
+
+    const bangladeshDisc = getRegion("bangladesh", "red-disc").shape;
+    expect(bangladeshDisc).toMatchObject({
+      kind: "circle",
+      cx: 135,
+      cy: 90,
+      r: 60
+    });
+
+    const canadaLeaf = getRegion("canada", "maple-leaf").shape;
+    expect(canadaLeaf).toMatchObject({
+      kind: "path",
+      transform: "scale(0.03125 0.0375)"
+    });
+
+    const australiaRegionIds = getRegionIds("australia");
+    expect(australiaRegionIds).toEqual(
+      expect.arrayContaining(["union-jack-white", "union-jack-red"])
+    );
+    expect(
+      australiaRegionIds.filter((id) => id.startsWith("southern-cross-"))
+    ).toHaveLength(5);
+
+    const argentinaSun = getRegion("argentina", "sun-of-may").shape as {
+      kind: string;
+      shapes?: Array<{ kind: string; points?: number }>;
+    };
+    expect(argentinaSun.kind).toBe("group");
+    expect(
+      argentinaSun.shapes?.find((shape) => shape.kind === "star")?.points
+    ).toBe(32);
+
+    expect(getRegion("mexico", "coat-of-arms").shape).toMatchObject({
+      kind: "circle",
+      r: 38
+    });
+
+    expect(getRegion("morocco", "green-pentagram").shape).toMatchObject({
+      kind: "polygon",
+      paint: { fill: "none", stroke: "current" }
+    });
+  });
+
+  it("keeps distinctive geometry for the expanded country pack", () => {
+    expect(getRegionIds("united-kingdom")).toEqual(
+      expect.arrayContaining(["white-crosses", "red-crosses"])
+    );
+    expect(getRegion("nepal", "red-double-pennant").shape).toMatchObject({
+      kind: "path"
+    });
+    expect(getRegion("nepal", "blue-border").hitShape).toMatchObject({
+      kind: "path",
+      paint: { strokeWidth: 42 }
+    });
+    expect(getRegion("palestine", "red-triangle").shape).toMatchObject({
+      kind: "polygon",
+      points: "0,0 100,90 0,180"
+    });
+
+    const malaysiaRedStripes = getRegion("malaysia", "red-stripes").shape as {
+      kind: string;
+      shapes?: unknown[];
+    };
+    const malaysiaWhiteStripes = getRegion("malaysia", "white-stripes").shape as {
+      kind: string;
+      shapes?: unknown[];
+    };
+    expect(malaysiaRedStripes.shapes).toHaveLength(7);
+    expect(malaysiaWhiteStripes.shapes).toHaveLength(7);
   });
 });

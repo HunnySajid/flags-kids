@@ -62,11 +62,18 @@ export const applyColorToRegion = (
     };
   }
 
+  const matchingRegions = country.flagRegions.filter(
+    (item) => item.colorName === selectedColorName
+  );
+  const newlyFilledRegions = Object.fromEntries(
+    matchingRegions.map((item) => [item.id, item.targetColor])
+  );
+
   const nextState = {
     ...state,
     filledRegions: {
       ...state.filledRegions,
-      [region.id]: region.targetColor
+      ...newlyFilledRegions
     }
   };
 
